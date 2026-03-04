@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    var params = new URLSearchParams(location.search);
+    var isContinuous = params.get('is_continuous') === 'true';
+    var scanType = params.get('scan_type') || 'all';
+    var callbackOrigin = params.get('origin') || '*';
+    var items = [];
+    var qr = null;
+    var locked = false;
+    var audioCtx = null;
+
+    var FORMAT_CONFIG = {
+      qr: [Html5QrcodeSupportedFormats.QR_CODE],
+      barcode: [
+        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93, Html5QrcodeSupportedFormats.CODABAR,
+        Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.RSS_14,
+        Html5QrcodeSupportedFormats.RSS_EXPANDED
+      ]
+    };
+
+    function getFormats() {
+      if (scanType === 'qr') return FORMAT_CONFIG.qr;
+      if (scanType === 'barcode') return FORMAT_CONFIG.barcode;
+      return FORMAT_CONFIG.qr.concat(FORMAT_CONFIG.barcode);
+    }
+
+    function getScanTypeLabel() {
+      return { qr: 'QR', barcode: 'バーコード', all: 'QR+バーコード' }[scanType] || scanType;
+    }
+
+    function boot() {
+      document.getElementById('mode-badge').textContent =
+        getScanTypeLabel() + ' / ' + (isContinuous ? '連続' : '単発');
+      if (isContinuous) document.getElementById('btn-done').style.display = 'block';
+
+      qr = new Html5Qrcode('reader');
+      qr.start(
+        { facingMode: 'environment' },
+        { fps: 10, formatsToSupport: getFormats(), qrbox: function(w, h) { var s = Math.min(w, h) * 0.7; return { width: s, height: s }; } },
+        onSuccess, function() {}
+      ).then(function() {
+        setStatus('スキャン待機中...');
+      }).catch(function(e) {
+        setStatus('カメラ起動失敗');
+        alert('カメラを起動できませんでした。\n' + e);
+      });
+    }
+
+    function onSuccess(text, result) {
+      if (!isContinuous && locked) return;
+
+      var isDuplicate = items.some(function(item) { return item.data === text; });
+      if (isDuplicate) {
+        playBeep(false);
+        toast('既に読み取り済み: ' + text, true);
+        return;
+      }
+
+      items.push({
+        data: text,
+        format: (result.result.format && result.result.format.formatName) || 'UNKNOWN',
+        scanned_at: new Date().toISOString()
+      });
+      renderList();
+      playBeep(true);
+      toast(text, false);
+      if (navigator.vibrate) navigator.vibrate(200);
+
+      if (!isContinuous) {
+        locked = true;
+        setStatus('読み取り完了。送信中...');
+        setTimeout(function() { finish('ok'); }, 600);
+      } else {
+        setStatus(items.length + '件読み取り済み');
+      }
+    }
+
+    function playBeep(success) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        if (success) {
+          osc.frequency.value = 1200;
+          osc.type = 'sine';
+          gain.gain.value = 0.3;
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.15);
+        } else {
+          osc.frequency.value = 300;
+          osc.type = 'square';
+          gain.gain.value = 0.2;
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.3);
+        }
+      } catch(e) {}
+    }
+
+    function toast(msg, isError) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + (isError ? 'toast-error' : 'toast-success');
+      el.textContent = isError ? msg : '読み取り: ' + msg;
+      var container = document.getElementById('toast-container');
+      container.appendChild(el);
+      setTimeout(function() { el.classList.add('toast-fade'); }, 1800);
+      setTimeout(function() { container.removeChild(el); }, 2300);
+    }
+
+    function finish(status) {
+      var result = { type: 'qr-scan-result', status: status, is_continuous: isContinuous, scan_type: scanType, items: status === 'ok' ? items : [] };
+      var send = function() {
+        if (window.opener) window.opener.postMessage(result, callbackOrigin);
+        window.close();
+        setTimeout(function() {
+          if (!window.closed)
+            document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#fff;">'
+              + '<h2>' + (status === 'ok' ? '読み取り完了（' + result.items.length + '件）' : 'キャンセル') + '</h2>'
+              + '<p style="margin-top:16px;color:#e94560;font-weight:bold;">このタブを閉じてください</p></div>';
+        }, 500);
+      };
+      if (qr) qr.stop().then(send).catch(send); else send();
+    }
+
+    function doneAndClose() {
+      if (items.length === 0 && !confirm('まだ何も読み取っていません。閉じますか？')) return;
+      finish('ok');
+    }
+
+    function renderList() {
+      var el = document.getElementById('scanned-list');
+      el.innerHTML = items.map(function(item, i) {
+        return '<div class="scanned-item"><span class="index">#' + (i + 1) + '</span>' + esc(item.data) + '</div>';
+      }).join('');
+      el.scrollTop = el.scrollHeight;
+      document.getElementById('count-badge').textContent = items.length;
+    }
+
+    function setStatus(msg) { document.getElementById('status-msg').textContent = msg; }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    document.addEventListener('DOMContentLoaded', boot);
+  </script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1a1a2e;color:#fff;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+    #header,#footer{padding:12px 16px;background:#16213e;flex-shrink:0}
+    #header{display:flex;justify-content:space-between;align-items:center}
+    #header h1{font-size:16px}
+    #mode-badge{font-size:11px;padding:4px 10px;border-radius:12px;background:#0f3460;color:#e94560;font-weight:600}
+    #status-msg{text-align:center;padding:4px;font-size:12px;color:#aaa;flex-shrink:0}
+    #reader-wrapper{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+    #reader{width:100%;max-width:500px}
+    #scanned-list{max-height:100px;overflow-y:auto;margin-bottom:8px}
+    .scanned-item{font-size:13px;padding:6px 8px;margin:2px 0;background:#0f3460;border-radius:4px;display:flex;align-items:center;word-break:break-all}
+    .index{color:#e94560;margin-right:8px;font-weight:bold;flex-shrink:0}
+    #btn-area{display:flex;gap:8px}
+    #btn-area button{flex:1;padding:14px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;color:#fff}
+    #btn-cancel{background:#533483}
+    #btn-done{background:#e94560}
+    #count-badge{background:#fff;color:#e94560;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;margin-left:4px}
+    #toast-container{position:fixed;top:50px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none}
+    .toast{padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;color:#fff;animation:toast-in .2s ease;max-width:90vw;word-break:break-all;text-align:center}
+    .toast-success{background:rgba(40,167,69,.92)}
+    .toast-error{background:rgba(220,53,69,.92)}
+    .toast-fade{opacity:0;transition:opacity .4s ease}
+    @keyframes toast-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+</head>
+<body>
+  <div id="header"><h1>QR Scanner</h1><span id="mode-badge">---</span></div>
+  <div id="status-msg">カメラを起動中...</div>
+  <div id="reader-wrapper"><div id="reader"></div></div>
+  <div id="toast-container"></div>
+  <div id="footer">
+    <div id="scanned-list"></div>
+    <div id="btn-area">
+      <button id="btn-cancel" onclick="finish('cancelled')">キャンセル</button>
+      <button id="btn-done" onclick="doneAndClose()" style="display:none">完了 <span id="count-badge">0</span></button>
+    </div>
+  </div>
+</body>
+</html>
+Copy
+GAS側: Code.gs
+Copyfunction doGet() {
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('QRコード読み取りシステム')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function processQrResults(data) {
+  if (!data || !data.items || data.items.length === 0) {
+    return { success: false, message: 'データがありません' };
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('QR_LOG');
+    if (!sheet) {
+      sheet = ss.insertSheet('QR_LOG');
+      sheet.appendRow(['ID', 'タイムスタンプ', 'QRデータ', 'フォーマット', 'スキャン時刻', 'スキャン種別', 'モード', 'ユーザー']);
+      sheet.getRange(1, 1, 1, 8).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+
+    var lastRow = sheet.getLastRow();
+    var mode = data.is_continuous ? '連続' : '単発';
+    var scanType = data.scan_type || 'all';
+    var user = Session.getActiveUser().getEmail() || '不明';
+    var rows = data.items.map(function(item, i) {
+      return [lastRow + i + 1, new Date(), item.data, item.format, item.scanned_at, scanType, mode, user];
+    });
+
+    sheet.getRange(lastRow + 1, 1, rows.length, 8).setValues(rows);
+    return { success: true, message: data.items.length + '件を記録しました' };
+  } finally {
+    lock.releaseLock();
+  }
+}
