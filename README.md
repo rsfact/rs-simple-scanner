@@ -3,8 +3,7 @@ QRおよびバーコードの単発・連続読み取りが可能。
 主にGAS等での簡易フロントエンド実装用。
 
 ## 呼び出し方
-https:///qr-scanner/index.html?is_continuous={boolean}&scan_type={string}&origin={string}
-
+https://rsfact.github.io/rs-simple-scanner/index.html?is_continuous={boolean}&scan_type={string}&origin={string}
 
 ### パラメータ
 
