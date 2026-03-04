@@ -64,20 +64,16 @@
       });
     }
 
-    function onSuccess(text, result) {
+    function onSuccess(text) {
       if (!isContinuous && locked) return;
 
-      if (items.some(function(item) { return item.data === text; })) {
+      if (items.some(function(item) { return item.value === text; })) {
         playBeep(false);
         toast('既に読み取り済み: ' + text, true);
         return;
       }
 
-      items.push({
-        data: text,
-        format: (result.result.format && result.result.format.formatName) || 'UNKNOWN',
-        scanned_at: new Date().toISOString()
-      });
+      items.push({ value: text, scanned_at: new Date().toISOString() });
       renderList();
       playBeep(true);
       toast(text, false);
@@ -140,7 +136,7 @@
     function renderList() {
       var el = document.getElementById('scanned-list');
       el.innerHTML = items.map(function(item, i) {
-        return '<div class="scanned-item"><span class="index">#' + (i + 1) + '</span>' + esc(item.data) + '</div>';
+        return '<div class="scanned-item"><span class="index">#' + (i + 1) + '</span>' + esc(item.value) + '</div>';
       }).join('');
       el.scrollTop = el.scrollHeight;
       document.getElementById('count-badge').textContent = items.length;
