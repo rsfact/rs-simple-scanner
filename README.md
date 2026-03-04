@@ -1,7 +1,4 @@
 # rs-simple--scanner
-
-# QR Scanner
-
 QRおよびバーコードの単発・連続読み取りが可能。
 主にGAS等での簡易フロントエンド実装用。
 
