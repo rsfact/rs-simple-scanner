@@ -173,6 +173,18 @@
     @keyframes toast-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
     @media(max-width:380px){#header h1{font-size:13px}#btn-area button{padding:10px;font-size:13px}.scanned-item{font-size:11px}}
     @media(min-width:768px){#reader{max-width:500px}}
+    #reader video {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+    }
+    #reader {
+      width: 100%;
+      max-width: 640px;
+      aspect-ratio: 3 / 4;
+      max-height: 100%;
+      position: relative;
+    }
   </style>
 </head>
 <body>
